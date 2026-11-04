@@ -1,0 +1,204 @@
+{
+  "name": "Ecosistema_Soporte_Autonomo_HITL",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nuevo-ticket",
+        "options": {}
+      },
+      "id": "df31e83a-2904-41de-a5d3-c1c0e25cc875",
+      "name": "Webhook: Entrada de Ticket",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-480, 96],
+      "webhookId": "70c0131b-6dc1-4318-98d7-56be73d8fa08"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.body.email }}",
+              "rightValue": "@midominio.com",
+              "operator": {"type": "string", "operation": "notContains"}
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.body.message }}",
+              "rightValue": "",
+              "operator": {"type": "string", "operation": "notEmpty"}
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "ef82c936-2e54-410d-88c0-02f6c252e4ef",
+      "name": "Filtro Anti-Bucle y Validación",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-256, 96]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {"__rl": true, "value": "REEMPLAZAR_AIRTABLE_BASE_ID", "mode": "id"},
+        "table": {"__rl": true, "value": "Tickets", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Aprobado": false,
+            "Asunto": "={{ $('Webhook: Entrada de Ticket').item.json.body.subject }}",
+            "Email_Remitente": "={{ $('Webhook: Entrada de Ticket').item.json.body.email }}",
+            "Mensaje": "={{ $('Webhook: Entrada de Ticket').item.json.body.message }}",
+            "Estado": "Pendiente"
+          }
+        }
+      },
+      "id": "d4747f6c-190c-442c-b068-c554f67519ad",
+      "name": "Airtable: Guardar Ticket",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [-32, -16]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Sos un analista de soporte técnico y comercial. Analiza este ticket y responde ÚNICAMENTE con un objeto JSON válido (sin bloques de código markdown ni texto adicional) con esta estructura:\n{\n  \"categoria\": \"Soporte Técnico\",\n  \"prioridad\": \"Alta\",\n  \"borrador_respuesta\": \"Hola, hemos recibido tu consulta. Nuestro equipo ya está revisando tu caso.\"\n}\n\nAsunto: {{ $('Airtable: Guardar Ticket').item.json.fields.Asunto }}\nMensaje: {{ $('Airtable: Guardar Ticket').item.json.fields.Mensaje }}",
+        "messages": {"messageValues": []},
+        "batching": {}
+      },
+      "id": "2f2a41d0-d448-4058-a93c-856c3c5495e4",
+      "name": "Basic LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [144, -16]
+    },
+    {
+      "parameters": {"modelName": "models/gemini-2.5-flash", "options": {}},
+      "id": "69419396-b981-478c-83cb-6372e8ff140f",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [144, 144]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {"__rl": true, "value": "REEMPLAZAR_AIRTABLE_BASE_ID", "mode": "id"},
+        "table": {"__rl": true, "value": "Tickets", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Airtable: Guardar Ticket').item.json.id }}",
+            "Categoria": "={{ JSON.parse($json.text.replace(/```json/g, '').replace(/```/g, '').trim()).categoria }}",
+            "Prioridad": "={{ JSON.parse($json.text.replace(/```json/g, '').replace(/```/g, '').trim()).prioridad }}",
+            "Borrador_Respuesta": "={{ JSON.parse($json.text.replace(/```json/g, '').replace(/```/g, '').trim()).borrador_respuesta }}",
+            "Estado": "En Revisión HITL",
+            "Aprobado": false
+          },
+          "matchingColumns": ["id"]
+        }
+      },
+      "id": "88cf6c0c-bf5d-4164-b9df-503b1eed44fc",
+      "name": "Airtable: Actualizar con Análisis",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [464, -16]
+    },
+    {
+      "parameters": {"resume": "webhook", "options": {"webhookSuffix": "aprobacion-humana"}},
+      "id": "8153c5ae-a3fe-49c1-879a-a08e41b9d359",
+      "name": "Wait: Esperar Aprobación HITL",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [656, -16],
+      "webhookId": "aprobacion-humana"
+    },
+    {
+      "parameters": {
+        "fromEmail": "REEMPLAZAR_EMAIL_REMITENTE",
+        "toEmail": "={{ $('Airtable: Guardar Ticket').item.json.fields.Email_Remitente }}",
+        "subject": "={{ $('Airtable: Guardar Ticket').item.json.fields.Asunto }}",
+        "html": "={{ $('Airtable: Actualizar con Análisis').item.json.fields.Borrador_Respuesta }}",
+        "options": {}
+      },
+      "id": "de045c37-a9e5-4f95-8bce-b900d6b16da4",
+      "name": "Send an Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [848, -16]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {"__rl": true, "value": "REEMPLAZAR_AIRTABLE_BASE_ID", "mode": "id"},
+        "table": {"__rl": true, "value": "Tickets", "mode": "name"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Airtable: Guardar Ticket').item.json.id }}",
+            "Estado": "Respondido"
+          },
+          "matchingColumns": ["id"]
+        }
+      },
+      "id": "44916447-5561-4ff4-ac95-5f661e172080",
+      "name": "Airtable: Marcar como Respondido",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1072, -16]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "base": {"__rl": true, "value": "REEMPLAZAR_AIRTABLE_BASE_ID", "mode": "id"},
+        "table": {"__rl": true, "value": "Tickets", "mode": "name"}
+      },
+      "id": "31bf8b18-d3e9-48c4-87b3-8e292ca30cc2",
+      "name": "Airtable: Registrar Error",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [-32, 208]
+    }
+  ],
+  "connections": {
+    "Webhook: Entrada de Ticket": {
+      "main": [[{"node": "Filtro Anti-Bucle y Validación", "type": "main", "index": 0}]]
+    },
+    "Filtro Anti-Bucle y Validación": {
+      "main": [
+        [{"node": "Airtable: Guardar Ticket", "type": "main", "index": 0}],
+        [{"node": "Airtable: Registrar Error", "type": "main", "index": 0}]
+      ]
+    },
+    "Airtable: Guardar Ticket": {
+      "main": [[{"node": "Basic LLM Chain", "type": "main", "index": 0}]]
+    },
+    "Basic LLM Chain": {
+      "main": [[{"node": "Airtable: Actualizar con Análisis", "type": "main", "index": 0}]]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [[{"node": "Basic LLM Chain", "type": "ai_languageModel", "index": 0}]]
+    },
+    "Airtable: Actualizar con Análisis": {
+      "main": [[{"node": "Wait: Esperar Aprobación HITL", "type": "main", "index": 0}]]
+    },
+    "Wait: Esperar Aprobación HITL": {
+      "main": [[{"node": "Send an Email", "type": "main", "index": 0}]]
+    },
+    "Send an Email": {
+      "main": [[{"node": "Airtable: Marcar como Respondido", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {"executionOrder": "v1", "binaryMode": "separate"},
+  "pinData": {},
+  "tags": []
+}
